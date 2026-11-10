@@ -1,19 +1,45 @@
-from fastapi import FastAPI, Depends
+import os
+import jwt
+from datetime import datetime, timedelta, timezone
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.security import OAuth2PasswordRequestForm
+from passlib.hash import pbkdf2_sha256
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from database import get_db
-from tabelas import Jogador
+from tabelas import Jogador, Usuario
 
 class JogadorEntrada(BaseModel):
     nome: str
     posicao: str
+
 class JogadorSaida(JogadorEntrada):
     id: int
 
     model_config = ConfigDict(from_attributes=True)
 
 app = FastAPI()
+
+CHAVE_JWT = os.environ["CHAVE_JWT"]
+
+@app.post("/token")
+def login(formulario: OAuth2PasswordRequestForm = Depends(), banco: Session = Depends(get_db)):
+    email = formulario.username.strip().lower()
+    usuario = banco.query(Usuario).filter_by(email=email).first()
+
+    if usuario is None:
+        raise HTTPException(status_code=401, detail="Email ou senha incorretos")
+
+    senha_correta = pbkdf2_sha256.verify(formulario.password, usuario.senha_hash)
+    if not senha_correta:
+        raise HTTPException(status_code=401, detail="Email ou senha incorretos")
+
+    validade = datetime.now(timezone.utc) + timedelta(minutes=30)
+    dados = {"sub": usuario.email, "exp": validade}
+    token = jwt.encode(dados, CHAVE_JWT, algorithm="HS256")
+
+    return {"access_token": token, "token_type": "bearer"}
 
 @app.get("/jogadores/")
 def listar_jogadores(posicao: str | None = None, banco: Session = Depends(get_db)) -> list[JogadorSaida]:
