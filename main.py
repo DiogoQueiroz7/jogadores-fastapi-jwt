@@ -2,7 +2,7 @@ import os
 import jwt
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, Depends, HTTPException
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from passlib.hash import pbkdf2_sha256
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func
@@ -22,6 +22,18 @@ class JogadorSaida(JogadorEntrada):
 app = FastAPI()
 
 CHAVE_JWT = os.environ["CHAVE_JWT"]
+oauth2 = OAuth2PasswordBearer(tokenUrl="token")
+
+def verificar_token(token: str = Depends(oauth2)):
+    try:
+        jwt.decode(
+            token,
+            CHAVE_JWT,
+            algorithms=["HS256"],
+            options={"require": ["exp", "sub"]},
+        )
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Token inválido ou vencido", headers={"WWW-Authenticate": "Bearer"})
 
 @app.post("/token")
 def login(formulario: OAuth2PasswordRequestForm = Depends(), banco: Session = Depends(get_db)):
@@ -55,7 +67,7 @@ def ver_jogador(jogador_id: int, banco: Session = Depends(get_db)) -> JogadorSai
         return j
     return None
 
-@app.post("/jogadores/")
+@app.post("/jogadores/", dependencies=[Depends(verificar_token)])
 def criar_jogador(jogador: JogadorEntrada, banco: Session = Depends(get_db)) -> JogadorSaida:
     novo = Jogador(nome=jogador.nome, posicao=jogador.posicao.lower())
     banco.add(novo)
@@ -63,7 +75,7 @@ def criar_jogador(jogador: JogadorEntrada, banco: Session = Depends(get_db)) -> 
     banco.refresh(novo)
     return novo
 
-@app.put("/jogadores/{jogador_id}")
+@app.put("/jogadores/{jogador_id}", dependencies=[Depends(verificar_token)])
 def atualizar_jogador(jogador_id: int, jogador: JogadorEntrada, banco: Session = Depends(get_db)) -> JogadorSaida | None:
     j = banco.get(Jogador, jogador_id)
     if j is not None:
@@ -74,7 +86,7 @@ def atualizar_jogador(jogador_id: int, jogador: JogadorEntrada, banco: Session =
         return j
     return None
 
-@app.delete("/jogadores/{jogador_id}")
+@app.delete("/jogadores/{jogador_id}", dependencies=[Depends(verificar_token)])
 def remover_jogador(jogador_id: int, banco: Session = Depends(get_db)) -> JogadorSaida | None:
     j = banco.get(Jogador, jogador_id)
     if j is not None:
